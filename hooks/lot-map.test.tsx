@@ -91,6 +91,8 @@ test('a password never reaches a label, even with a slash, a question mark or a 
   expect(label('https://host.com:8080/x?mail=a@b.com')).toBe('https')
   expect(label('https://host.com/x?mail=a@b.com')).toBe('host.com')
   expect(label('https://[::1]:8080/x')).toBe('[::1]:8080')
+  expect(label('https://[::1]/x?mail=a@b.com')).toBe('[::1]')
+  expect(label('https://[::1]:8080/x?tok=@secret-token')).toBe('[::1]:8080')
   expect(label('https://пример.рф/x')).toBe('пример.рф')
   expect(label('https://bad host/x')).toBe('https')
 })

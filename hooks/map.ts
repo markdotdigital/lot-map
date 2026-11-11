@@ -87,7 +87,7 @@ function hostOf(url: string): string {
   const first = end < 0 ? rest : rest.slice(0, end)
   const beyond = end < 0 ? '' : rest.slice(end)
   let host = first.split('@').pop() ?? ''
-  if (!first.includes('@') && first.includes(':') && beyond.includes('@')) {
+  if (!first.startsWith('[') && !first.includes('@') && first.includes(':') && beyond.includes('@')) {
     // `name:word` before an `@` further on: a port if the word is a number, or else a login and a password.
     host = /:\d+$/.test(first) ? '' : (rest.slice(rest.lastIndexOf('@') + 1).split(/[/?#]/)[0] ?? '')
   }
