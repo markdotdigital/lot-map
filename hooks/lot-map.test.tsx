@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Board } from '../types'
 import type { Entry } from '../types'
-import { classify, clean, drawMap, firstLine, foldRows, formatMs, memoryIds, routeOf, setupFrom } from './map'
+import { classify, clean, drawMap, firstLine, foldRows, formatMs, memoryIds, routeOf, setupFrom, shortModel } from './map'
 import { stringsFor } from './text'
 
 const PANE = {
@@ -569,4 +569,50 @@ test('the ring can be turned so that the person is at the bottom and the network
   // A turned map does not leak into the next one drawn, and nonsense counts as not set.
   expect(drawMap(board, 1000, setupFrom({ theme: 'dark' }))).toBe(usual)
   expect(drawMap(board, 1000, setupFrom({ theme: 'dark', layout: 'sideways' }))).toBe(usual)
+})
+
+// ---- Antigravity ---------------------------------------------------------------------------------
+
+test('Antigravity calls land on the same stations and keep the same silence on content', () => {
+  const at = (tool: string, input: Record<string, unknown>) => classify(tool, input, SETUP).station
+  const label = (tool: string, input: Record<string, unknown>) => classify(tool, input, SETUP).label
+
+  expect(at('read_file', { Path: '/a/b/c/content.py' })).toBe('files')
+  expect(label('read_file', { Path: '/a/b/c/content.py' })).toBe('c/content.py')
+  expect(at('read_file', { Path: '/Users/a/.gemini/antigravity/knowledge/topic/overview.md' })).toBe('memory')
+  expect(classify('read_file', { Path: '/Users/a/.gemini/config/skills/pdf-builder/SKILL.md' }, SETUP)).toEqual({ station: 'skills', label: 'pdf-builder' })
+  expect(classify('write_file', { Path: '/a/b/plan.md', Content: 'secret plan', ArtifactMetadata: { UserFacing: true } }, SETUP)).toEqual({ station: 'you', label: 'b/plan.md' })
+  expect(classify('edit_file', { Path: '/a/b/c.ts', Target: 'secret', Replacement: 'more secret' }, SETUP)).toEqual({ station: 'files', label: 'b/c.ts' })
+  expect(classify('grep_search', { Query: 'private' }, SETUP)).toEqual({ station: 'files', label: 'grep_search' })
+  expect(at('find_by_name', { Pattern: '*secret*' })).toBe('files')
+  expect(at('list_dir', { DirectoryPath: '/a/b' })).toBe('files')
+
+  expect(classify('run_command', { CommandLine: 'git push origin main', toolSummary: 'Push branch' }, SETUP)).toEqual({ station: 'web', label: 'Push branch' })
+  expect(classify('run_command', { CommandLine: 'recall add "private text"', toolSummary: 'Save note' }, SETUP)).toEqual({ station: 'memory', label: 'add' })
+  expect(classify('run_command', { CommandLine: 'npm test -- --secret', toolSummary: 'Unit test run' }, SETUP)).toEqual({ station: 'shell', label: 'Unit test run' })
+  expect(classify('manage_task', { Action: 'status', Input: 'secret' }, SETUP)).toEqual({ station: 'shell', label: 'task status' })
+
+  expect(classify('read_url_content', { Url: 'https://user:private@a.b/secret?x=1' }, SETUP)).toEqual({ station: 'web', label: 'a.b' })
+  expect(classify('read_url_content', { Url: 'http://[::1]/cb?tok=@secret-val' }, SETUP)).toEqual({ station: 'web', label: '[::1]' })
+  expect(classify('search_web', { query: 'private query' }, SETUP)).toEqual({ station: 'web', label: 'поиск в сети' })
+  expect(classify('search_web', { query: 'private query', domain: 'https://docs.a.b/path' }, SETUP)).toEqual({ station: 'web', label: 'docs.a.b' })
+  expect(classify('browser_subagent', { TaskName: 'Verify layout', Task: 'open private url' }, SETUP)).toEqual({ station: 'browser', label: 'Verify layout' })
+
+  expect(classify('invoke_subagent', { Role: 'Codebase Researcher', Prompt: 'private instructions' }, SETUP)).toEqual({ station: 'agents', label: 'Codebase Researcher' })
+  expect(classify('swarm', { action: 'add', name: 'verifier', brief: 'private brief' }, SETUP)).toEqual({ station: 'agents', label: 'swarm: verifier' })
+  expect(classify('send_message', { Recipient: 'abc', Message: 'private message' }, SETUP)).toEqual({ station: 'agents', label: 'send message' })
+  expect(classify('search_marketplace', { queries: ['private'] }, SETUP)).toEqual({ station: 'skills', label: 'search marketplace' })
+  expect(classify('ask_question', { questions: [{ question: 'private?' }] }, SETUP)).toEqual({ station: 'you', label: 'вопрос тебе' })
+  expect(classify('schedule', { Prompt: 'private reminder' }, SETUP)).toEqual({ station: 'hooks', label: 'schedule' })
+
+  expect(classify('call_mcp_tool', { ServerName: 'recall', ToolName: 'get_note', Arguments: { id: 7, query: 'private' } }, SETUP)).toEqual({ station: 'memory', label: 'чтение записи #7' })
+  expect(classify('call_mcp_tool', { ServerName: 'chrome-devtools-mcp', ToolName: 'navigate_page', Arguments: { url: 'https://u:pw@a.b/x' } }, SETUP)).toEqual({ station: 'browser', label: 'a.b' })
+  expect(classify('call_mcp_tool', { ServerName: 'github', ToolName: 'list_issues', Arguments: { repo: 'private' } }, SETUP)).toEqual({ station: 'web', label: 'github: list issues' })
+  expect(classify('mcp_chrome-devtools-mcp_take_snapshot', {}, SETUP)).toEqual({ station: 'browser', label: 'take snapshot' })
+
+  expect(shortModel('claude-opus-5-5')).toBe('opus 5.5')
+  expect(shortModel('Gemini 4 Carbon (Medium)')).toBe('4 carbon')
+  expect(shortModel('gemini-2.5-pro')).toBe('2.5 pro')
+  expect(shortModel('gemini-2.5-flash-preview-05-20')).toBe('2.5 flash')
+  expect(shortModel('Claude Sonnet 4.6 (Thinking)')).toBe('sonnet 4.6')
 })

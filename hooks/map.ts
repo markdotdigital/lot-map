@@ -100,10 +100,12 @@ export function clean(label: string, max = 120): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }
 
-/** Claude Code's own memory folder counts for everyone; anything else is the person's to name. */
+/** Each engine's own memory folder counts for everyone; anything else is the person's to name. */
 const isMemoryPath = (path: string, setup: Setup): boolean =>
-  /\/\.claude\/projects\/[^/]+\/memory\//.test(path) || setup.memoryPaths.some(part => path.includes(part))
+  /\/\.claude\/projects\/[^/]+\/memory\/|\/\.gemini\/antigravity\/knowledge\//.test(path) || setup.memoryPaths.some(part => path.includes(part))
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+const rec = (v: unknown): Record<string, unknown> => (typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {})
+const BROWSER_SERVERS = new Set(['Claude_Browser', 'claude-in-chrome', 'chrome-devtools-mcp', 'chrome-devtools', 'puppeteer', 'playwright', 'peekaboo'])
 
 /** Commands that work on files and nothing else: they read, search, move or edit them in place. echo, cd and the like say nothing either way. */
 const FILE_WORDS = new Set(['cat', 'head', 'tail', 'sed', 'grep', 'rg', 'find', 'ls', 'wc', 'cp', 'mv', 'mkdir', 'touch', 'diff', 'cmp', 'sort', 'uniq', 'cut', 'tr', 'awk', 'tee', 'stat', 'file', 'du', 'tree', 'ln', 'basename', 'dirname', 'realpath', 'jq'])
@@ -180,6 +182,23 @@ function classifyBash(command: string, description: string, setup: Setup): Class
   return { station: 'shell', label }
 }
 
+function classifyMcp(server: string, name: string, input: Record<string, unknown>, setup: Setup): Classified {
+  const words = name.replace(/_/g, ' ')
+  if (setup.memoryServers.has(server)) {
+    // A number, or a short identifier: a longer string under `id` could be anything.
+    const id = typeof input.id === 'number' || (typeof input.id === 'string' && /^[\w-]{1,24}$/.test(input.id)) ? ` #${input.id}` : ''
+    return { station: 'memory', label: (setup.memoryLabels.get(name) ?? words) + id }
+  }
+  if (BROWSER_SERVERS.has(server)) {
+    const url = str(input.url) || str(input.Url)
+    return { station: 'browser', label: url && /^[a-z]+:/i.test(url) ? hostOf(url) : words }
+  }
+  if (server === 'terminal') return { station: 'shell', label: words }
+  if (server === 'visualize' || server.startsWith('ccd_')) return { station: 'you', label: words }
+  if (server === 'plugin-authoring') return { station: 'skills', label: words }
+  return { station: 'web', label: server ? `${server}: ${words}` : words || 'mcp' }
+}
+
 export function classify(tool: string, input: Record<string, unknown>, setup: Setup): Classified {
   const { t } = setup
   switch (tool) {
@@ -190,55 +209,109 @@ export function classify(tool: string, input: Record<string, unknown>, setup: Se
       const path = str(input.file_path) || str(input.notebook_path)
       return { station: isMemoryPath(path, setup) ? 'memory' : 'files', label: lastTwo(path) || tool }
     }
+    case 'read_file':
+    case 'view_file':
+    case 'view_file_outline':
+    case 'view_code_item': {
+      const path = str(input.Path) || str(input.AbsolutePath) || str(input.File) || str(input.file_path)
+      const skill = (tool === 'read_file' || tool === 'view_file') ? /\/skills\/([^/]+)\/SKILL\.md$/i.exec(path)?.[1] : undefined
+      if (skill !== undefined) return { station: 'skills', label: skill }
+      return { station: isMemoryPath(path, setup) ? 'memory' : 'files', label: lastTwo(path) || tool }
+    }
+    case 'write_file':
+    case 'write_to_file':
+    case 'edit_file':
+    case 'replace_file_content':
+    case 'multi_replace_file_content': {
+      const path = str(input.Path) || str(input.TargetFile) || str(input.AbsolutePath) || str(input.file_path)
+      if ((tool === 'write_file' || tool === 'write_to_file') && rec(input.ArtifactMetadata).UserFacing === true) {
+        return { station: 'you', label: lastTwo(path) || t.fileForYou }
+      }
+      return { station: isMemoryPath(path, setup) ? 'memory' : 'files', label: lastTwo(path) || tool }
+    }
     case 'Grep':
     case 'Glob':
+    case 'grep_search':
+    case 'find_by_name':
+    case 'list_dir':
+    case 'code_search':
       return { station: 'files', label: tool }
     case 'Bash':
-      return classifyBash(str(input.command), str(input.description), setup)
+    case 'run_command':
+      return classifyBash(str(input.command) || str(input.CommandLine), str(input.description) || str(input.toolSummary), setup)
+    case 'manage_task':
+    case 'command_status':
+    case 'send_command_input':
+      return { station: 'shell', label: str(input.Action) ? `task ${str(input.Action)}` : tool.replace(/_/g, ' ') }
     case 'WebFetch':
-      return { station: 'web', label: hostOf(str(input.url)) }
+    case 'read_url_content':
+    case 'read_web_page':
+      return { station: 'web', label: hostOf(str(input.url) || str(input.Url)) }
     case 'WebSearch':
-      return { station: 'web', label: t.webSearch }
+    case 'search_web': {
+      const domain = str(input.domain)
+      return { station: 'web', label: (domain ? hostOf(domain) : '') || t.webSearch }
+    }
     case 'Artifact':
       return { station: 'web', label: t.artifact }
+    case 'browser_subagent':
+      return { station: 'browser', label: str(input.TaskName) || str(input.RecordingName) || t.stations.browser.toLowerCase() }
     case 'Agent':
-      return { station: 'agents', label: str(input.description) || t.subagent }
+    case 'invoke_subagent':
+    case 'define_subagent':
+      return { station: 'agents', label: str(input.description) || str(input.Role) || str(input.TypeName) || str(input.Name) || t.subagent }
+    case 'manage_subagents':
+      return { station: 'agents', label: str(input.Action) ? `subagents ${str(input.Action)}` : 'subagents' }
     case 'Workflow':
       return { station: 'agents', label: t.workflow }
     case 'SendMessage':
     case 'TaskStop':
       return { station: 'agents', label: tool }
+    case 'send_message':
+    case 'swarm_wait':
+    case 'read_board':
+    case 'post_message':
+      return { station: 'agents', label: tool.replace(/_/g, ' ') }
+    case 'swarm':
+      return { station: 'agents', label: str(input.name) ? `swarm: ${str(input.name)}` : str(input.action) ? `swarm ${str(input.action)}` : 'swarm' }
     case 'Skill':
       return { station: 'skills', label: str(input.skill) || t.skill }
     case 'ToolSearch':
       return { station: 'skills', label: t.loadingTools }
+    case 'search_marketplace':
+    case 'list_plugin_accounts':
+      return { station: 'skills', label: tool.replace(/_/g, ' ') }
+    case 'list_resources':
+    case 'read_resource':
+      return { station: 'web', label: str(input.ServerName) ? `${str(input.ServerName)}: ${tool.replace(/_/g, ' ')}` : tool.replace(/_/g, ' ') }
     case 'AskUserQuestion':
+    case 'ask_question':
       return { station: 'you', label: t.questionForYou }
     case 'SendUserFile':
       return { station: 'you', label: t.fileForYou }
+    case 'notify_user':
+      return { station: 'you', label: t.answerReady }
+    case 'schedule':
+      return { station: 'hooks', label: 'schedule' }
+    case 'call_mcp_tool':
+      return classifyMcp(str(input.ServerName), str(input.ToolName), rec(input.Arguments), setup)
   }
-  const mcp = /^mcp__([^_].*?)__(.+)$/.exec(tool)
+  const mcp = /^mcp__([^_].*?)__(.+)$/.exec(tool) ?? /^mcp_([^_]+)_(.+)$/.exec(tool)
   if (mcp === null) return { station: 'shell', label: tool }
   const [, server = '', name = ''] = mcp
-  if (setup.memoryServers.has(server)) {
-    // A number, or a short identifier: a longer string under `id` could be anything.
-    const id = typeof input.id === 'number' || (typeof input.id === 'string' && /^[\w-]{1,24}$/.test(input.id)) ? ` #${input.id}` : ''
-    return { station: 'memory', label: (setup.memoryLabels.get(name) ?? name.replace(/_/g, ' ')) + id }
-  }
-  if (server === 'Claude_Browser' || server === 'claude-in-chrome') {
-    const url = str(input.url)
-    return { station: 'browser', label: url && /^[a-z]+:/i.test(url) ? hostOf(url) : name.replace(/_/g, ' ') }
-  }
-  if (server === 'terminal') return { station: 'shell', label: name.replace(/_/g, ' ') }
-  if (server === 'visualize' || server.startsWith('ccd_')) return { station: 'you', label: name.replace(/_/g, ' ') }
-  if (server === 'plugin-authoring') return { station: 'skills', label: name.replace(/_/g, ' ') }
-  return { station: 'web', label: `${server}: ${name.replace(/_/g, ' ')}` }
+  return classifyMcp(server, name, input, setup)
 }
 
-/** `claude-opus-5-5` reads as `opus 5.5`. */
+/** `claude-opus-5-5` reads as `opus 5.5`; `Gemini 4 Carbon (Medium)` reads as `4 carbon`. */
 export function shortModel(model: string): string {
   const m = /claude-([a-z]+)-(\d+)(?:-(\d+))?/.exec(model)
-  return m === null ? model : `${m[1]} ${m[2]}${m[3] !== undefined ? `.${m[3]}` : ''}`
+  if (m !== null) return `${m[1]} ${m[2]}${m[3] !== undefined ? `.${m[3]}` : ''}`
+  const trimmed = model.replace(/\s*\([^)]*\)\s*$/, '').trim()
+  const g = /^gemini[-\s]+(.+)$/i.exec(trimmed)?.[1]
+  if (g !== undefined) return g.replace(/-(?:preview|exp|latest).*$/i, '').replace(/-/g, ' ').toLowerCase()
+  const c = /^claude[-\s]+(.+)$/i.exec(trimmed)?.[1]
+  if (c !== undefined) return c.toLowerCase()
+  return trimmed || model
 }
 
 export function formatMs(ms: number, t: Strings): string {
