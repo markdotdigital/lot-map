@@ -1,0 +1,11 @@
+{
+  "name": "lot-map",
+  "displayName": "Work map",
+  "version": "0.3.1",
+  "description": "A live map beside the chat: memory, files, shell, network, browser, model, agents, skills and hooks light up as they are used.",
+  "logo": "assets/logo.svg",
+  "author": { "name": "Aleksei Volodin", "url": "https://github.com/alexeyw" },
+  "homepage": "https://github.com/alexeyw/lot-map",
+  "repository": "https://github.com/alexeyw/lot-map",
+  "suggestedPrompts": ["Open the live work map beside the chat"]
+}

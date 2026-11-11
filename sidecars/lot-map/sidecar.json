@@ -1,0 +1,13 @@
+{
+  "command": "node",
+  "args": ["main.mjs"],
+  "restart_policy": "always",
+  "display_name": "Work map",
+  "description": "Live radial map of the current conversation's tool calls, model steps, memory, skills, hooks, subagents and swarm workers.",
+  "has_web_ui": true,
+  "agent_permissions": { "allows_user_interactions": false },
+  "ui_config": {
+    "display_name": "Work map",
+    "views": [{ "path": "/", "entrypoint": "SIDECAR_UI_ENTRYPOINT_AUX_PANE", "title": "Work map" }]
+  }
+}

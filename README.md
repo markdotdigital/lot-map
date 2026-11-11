@@ -1,6 +1,6 @@
 # lot-map
 
-A mod for Claude Code: a live map of the work, in a pane beside the chat. Every tool call, model step, hook and skill sends a pulse from the centre to its station, so you see memory, files, shell, web and agents at work instead of reading a list of commands.
+A mod for Claude Code and Google Antigravity: a live map of the work, in a pane beside the chat. Every tool call, model step, hook and skill sends a pulse from the centre to its station, so you see memory, files, shell, web and agents at work instead of reading a list of commands.
 
 ![The map during a work session](docs/demo.gif)
 
@@ -24,18 +24,28 @@ In the desktop app: click **+** next to the prompt box, then **Plugins**, **Add 
 
 The pane opens by itself when a session starts. In a terminal it needs at least 144 columns and draws text only; otherwise type `/lot-map`. Built and tested on Claude Code 2.1.321 on macOS; users report it working on Windows as well.
 
+### Antigravity
+
+Clone the repository into `~/.gemini/config/plugins/lot-map` (or `.agents/plugins/lot-map` in a workspace):
+
+```bash
+git clone https://github.com/alexeyw/lot-map ~/.gemini/config/plugins/lot-map
+```
+
+Enable **Work map** in Customizations → Plugins if needed, then open **Work map** in the Auxiliary Pane beside the chat (or ask the agent to open `sidecar://lot-map/lot-map/`). Requires Node 22.18 or newer.
+
 ## What lights up
 
 | Station | When |
 | --- | --- |
 | You | your messages, questions and files sent to you |
 | Model | each model request, context compaction |
-| Memory | Claude Code's memory folder, plus whatever you name in the options |
-| Files | Read, Write, Edit, Grep, Glob, and shell commands that work on files and nothing else: they read, search, move, delete or edit in place (`cat`, `grep`, `mv`, `sed -i`, `tee`, `find … -delete`) |
-| Shell | every other shell command |
+| Memory | Claude Code's memory folder or Antigravity's knowledge folder, plus whatever you name in the options |
+| Files | Read, Write, Edit, Grep, Glob (`read_file`, `write_file`, `edit_file`, `grep_search`, `find_by_name`, `list_dir` in Antigravity), and shell commands that work on files and nothing else: they read, search, move, delete or edit in place (`cat`, `grep`, `mv`, `sed -i`, `tee`, `find … -delete`) |
+| Shell | every other shell command and background task control |
 | Network | web fetch and search, MCP servers, and shell commands known to reach the network: `curl`, `gh`, `ssh`, `rsync`, `git push`, `npm install`, `docker pull` and the like, also inside `$(…)` |
 | Browser | browser tools |
-| Agents | subagents and workflows; their own calls start from this station |
+| Agents | subagents, workflows and Antigravity swarms; their own calls start from this station |
 | Skills | skills and tool search |
 | Hooks | settings hooks that refuse a call, ask for permission, add context or take a moment |
 
@@ -68,12 +78,12 @@ Below the map are the current action with the context percentage, and the last 1
 
 ## Options
 
-The install offers them on a screen. Later, use `/config` in a terminal or `claude plugin configure`, then restart the session.
+The install offers them on a screen. Later, use `/config` in a terminal or `claude plugin configure`, then restart the session. In Antigravity, write them as JSON in `~/.gemini/config/lot-map.json` (or `<appData>/sidecar_data/lot-map/lot-map/data/options.json`, plus optional `contextWindow`); changes take effect on the next poll.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `language` | `en` | `en`, `ru`, `es`, `fr` or `de` |
-| `coreName` | `CLAUDE` | what the circle in the middle says, up to ten characters |
+| `coreName` | `CLAUDE` / `AGY` | what the circle in the middle says, up to ten characters |
 | `memoryServers` | `memory` | MCP servers whose tools light Memory |
 | `memoryCommands` | none | shell commands or scripts that light Memory; a name counts when it is the command itself or begins with it and `-`, `_` or `.`, so `recall` also names `recall-sync.py` |
 | `memorySubcommands` | none | words after a memory command that the map may show, such as `add` or `search`; without them the command goes by its own name |
@@ -98,11 +108,13 @@ Lists are written with commas.
 
 ## What it shows and what it keeps
 
-The mod makes no network requests, reads no files, runs no processes, calls no model and adds nothing to the conversation. Its rows live only for the session.
+In Claude Code, the mod makes no network requests, reads no files, runs no processes, calls no model and adds nothing to the conversation. Its rows live only for the session.
 
-Like any mod that follows tool calls, it is handed every call's whole input, including command lines and the text written to files. It takes names from that and nothing else; the code that does so is `classify` in `hooks/map.ts`. A marketplace added from this repository follows its `main` branch, so an update brings whatever is there: read the diff before updating if that matters to you.
+In Antigravity, the Auxiliary Pane runs as a loopback (`127.0.0.1`) UI sidecar with a strict Content Security Policy and no external network requests. Because Antigravity plugins observe conversations out of process, the sidecar reads `<appData>/brain/<conversationId>/.system_generated/logs/transcript.jsonl` (plus spawned subagent transcripts and `swarm/members.json` under the same `brain/` directory, verified with `realpathSync`) and passes each step through the same `classify` rules. It writes no files, runs no hooks in the agent loop, calls no model and adds nothing to the conversation.
 
-It asks Claude Code for one thing: how full the context window is, after each model step. Between sessions it keeps one thing, the name of the model last used in each folder, so that it can show a change. Each is stored under the folder's full path, in Claude Code's own store for the plugin.
+Like any mod that follows tool calls, it sees every call's whole input, including command lines and the text written to files. It takes names from that and nothing else; the code that does so is `classify` in `hooks/map.ts`. A marketplace added from this repository follows its `main` branch, so an update brings whatever is there: read the diff before updating if that matters to you.
+
+In Claude Code, it asks the engine for one thing: how full the context window is, after each model step (in Antigravity, token counts come from the planner steps in `transcript.jsonl`). Between Claude Code sessions it keeps one thing, the name of the model last used in each folder, so that it can show a change. Each is stored under the folder's full path, in Claude Code's own store for the plugin.
 
 A label holds a name, never content:
 
@@ -123,6 +135,7 @@ A fault on the map never reaches a tool call or a model turn.
 ```bash
 claude plugin test .
 claude plugin validate .
+node --test sidecars/lot-map/lot-map-agy.test.mjs
 ```
 
 Words live in `hooks/text.ts`; a new language is one more table there and one more value of `language` in `.claude-plugin/plugin.json`.
